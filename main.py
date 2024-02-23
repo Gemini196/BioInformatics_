@@ -15,10 +15,14 @@ from sklearn.linear_model import LinearRegression
 def train_and_predict(model, X_train, X_test, y_train, y_test):
     model.fit(X_train, y_train) # Train the model
     predictions = model.predict(X_test) # Make predictions on the test set
-    #predictions[predictions <= 0] = 1e-10  # Handling zero values in predictions
-    predictions[predictions < 0] = 0  # Handling negative values in predictions
+
+    # Removing negative values in predictions
+    mask = predictions >= 0
+    predictions = predictions[mask]
+    y_test = y_test[mask]
+
     r2 = r2_score(y_test, predictions)
-    return predictions
+    return predictions, y_test
 
 
 def print_stats(y_test, predictions):
@@ -32,20 +36,42 @@ def print_stats(y_test, predictions):
     print(f"\nSpearman Rho:{correlation_coefficient}\np-value:{p_value}")
 
 
+def merge_identical_xlsx_columns(df, col_name1, col_name2, merged_col_name):
+    df[merged_col_name] = df[col_name1].fillna(df[col_name2])
+    if merged_col_name == col_name1:
+        df.drop(col_name2, axis=1, inplace=True)
+    elif merged_col_name == col_name2:
+        df.drop(col_name1, axis=1, inplace=True)
+    else:
+        df.drop([col_name1, col_name2], axis=1, inplace=True)
+    return df
+
+
 if __name__ == '__main__':
     #############################################
     ########## Load and Clean Data ##############
     #############################################
-    # Load clinical data file
+    # Load original clinical data file
     df = pd.read_csv('./ccle_broad_2019_clinical_data.csv')
-    df_cleaned = df.dropna(subset=['Doubling Time (hrs)']) # Clean 'NA' labels
-    patient_IDs = df_cleaned["Patient ID"].tolist() # who was left after cleaning NA
 
     # Load second clinical data file
     df2 = pd.read_excel('./merged_doubling_time_with_site.xlsx')
+    df2 = merge_identical_xlsx_columns(df2, "CCLE Doubling Time (hrs)","Doubling.Time.Calculated.hrs",
+                                       "CCLE Doubling Time (hrs)")
+
+    # merge only CCLE data
+    for index, row in df2.iterrows():
+        matching_row = df[df['DepMap ID'] == row['Parental cell line ID']]
+        if not matching_row.empty:
+            df.loc[matching_row.index, 'Doubling Time (hrs)'] = row['CCLE Doubling Time (hrs)']
+
+    df_cleaned = df.dropna(subset=['Doubling Time (hrs)']) # Clean 'NA' labels
+    patient_IDs = df_cleaned["Patient ID"].tolist() # who was left after cleaning NA
+
 
     # Load RNA expression data (use Reads Per Kilobase data)
     expression_df = pd.read_csv('./ccle_broad_2019/data_mrna_seq_rpkm.txt',  sep='\t')
+
     # Remove patients with NA Doubling Time
     selected_columns = ['Hugo_Symbol'] + [col for col in patient_IDs if col in expression_df.columns]
     expression_df = expression_df[selected_columns]
@@ -64,8 +90,6 @@ if __name__ == '__main__':
     num_rows, num_columns = df_cleaned_sorted_filtered.shape
     print(f'Successfully loaded data.\nNumber of rows:{num_rows}\nNumber of columns:{num_columns-1}')
     print(df_cleaned_sorted_filtered.head())
-
-    ## At this point we've got sorted expression data from 529 patients ##
 
     # Prepare counts
     counts = expression_df_sorted
@@ -92,7 +116,7 @@ if __name__ == '__main__':
         # Calculate correlation and p-value
         correlation_coefficient, p_value = pearsonr(gene_expression, metadata['Doubling Time (hrs)'].tolist())
 
-        if abs(correlation_coefficient) >= 0.4 and p_value <= 0.05:
+        if abs(correlation_coefficient) >= 0.38 and p_value <= 0.05:
             genes.append(counts.columns[gene_idx])
             pvals.append(p_value)
             rhos.append(correlation_coefficient)
@@ -111,8 +135,8 @@ if __name__ == '__main__':
 
     ############## Random Forest ##############
     print("\n--- Random Forest ---\n")
-    rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
-    predictions = train_and_predict(rf_model, X_train, X_test, y_train, y_test)
+    rf_model = RandomForestRegressor(random_state=42) # n_estimators=100
+    predictions, y_test = train_and_predict(rf_model, X_train, X_test, y_train, y_test)
 
     print_stats(np.log10(y_test), np.log10(predictions))
 
@@ -129,7 +153,7 @@ if __name__ == '__main__':
     ############## Linear Regression ##############
     print("\n--- Linear Regression ---\n")
     lr_model = LinearRegression()
-    predictions = train_and_predict(lr_model, X_train, X_test, y_train, y_test)
+    predictions, y_test = train_and_predict(lr_model, X_train, X_test, y_train, y_test)
 
     print_stats(y_test, predictions)
 
@@ -142,6 +166,3 @@ if __name__ == '__main__':
     plt.title('Correlation Figure')
     plt.legend()
     plt.show()
-
-
-
