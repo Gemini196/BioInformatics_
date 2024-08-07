@@ -1,7 +1,9 @@
-./venv
+venv
 ./ccle_broad_2019_clinical_data.csv
-./ccle_broad_2019
-./DATA
-./documents
-./venv310
-./old_stuff
+ccle_broad_2019
+DATA
+documents
+venv310
+old_stuff
+expression.csv
+metadata.csv
